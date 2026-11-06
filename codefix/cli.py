@@ -103,6 +103,46 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         print(f"\n[{u.model}] {u.input_tokens} in / {u.output_tokens} out tokens, {cost}, {u.latency_s}s")
     return 0 if not diag.warnings else 1
 
+def cmd_fix(args: argparse.Namespace) -> int:
+    from codefix.agent import run_fix, save_run
+    from codefix.llm import LLM
+
+    def ask_human(patch, attempt) -> bool:
+        print(f"\nAttempt {attempt.number} passed in the sandbox. "
+              f"Fixed: {', '.join(attempt.fixed)}. Regressions: none.")
+        print(f"\nProposed patch:\n{patch.diff()}")
+        if args.yes:
+            print("Approved automatically (--yes).")
+            return True
+        if args.dry_run:
+            print("Dry run: not applying.")
+            return False
+        answer = input(f"Apply this patch to {patch.file}? [y/N] ").strip().lower()
+        return answer in ("y", "yes")
+
+    result = run_fix(
+        args.repo,
+        args.issue,
+        llm=LLM(model=args.model),
+        max_attempts=args.max_attempts,
+        approve=ask_human,
+        timeout=args.timeout,
+        on_event=print,
+    )
+
+    totals = result.totals()
+    cost = f"${totals['cost_usd']:.4f}" if totals["cost_usd"] is not None else "unknown cost"
+    print(f"\nStatus: {result.status}")
+    if result.final_report:
+        r = result.final_report
+        print(f"Tests in {args.repo} now: {r.passed} passed, {r.failed} failed")
+    print(f"{len(result.attempts)} attempt(s), {totals['llm_calls']} LLM call(s), "
+          f"{totals['input_tokens']} in / {totals['output_tokens']} out tokens, {cost}, "
+          f"{result.duration_s}s total")
+    if not args.no_log:
+        print(f"Run log: {save_run(result)}")
+    return 0 if result.status in ("fixed", "fixed_not_applied") else 1
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codefix", description="Inspect and test small Python repos.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -140,7 +180,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-tests", action="store_true", help="Do not run tests or send their output")
     p.add_argument("--json", action="store_true")
     p.set_defaults(handler=cmd_diagnose)
-    
+
+    p = sub.add_parser("fix", help="Diagnose, patch, test in a sandbox, and apply with approval")
+    p.add_argument("repo")
+    p.add_argument("issue", help="The bug report text")
+    p.add_argument("--max-attempts", type=int, default=3)
+    p.add_argument("--timeout", type=int, default=60, help="Seconds allowed for each test run")
+    p.add_argument("--model", default=None)
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--yes", action="store_true", help="Apply without asking (for scripts)")
+    group.add_argument("--dry-run", action="store_true", help="Never apply, just show the result")
+    p.add_argument("--no-log", action="store_true", help="Do not write a run log to runs/")
+    p.set_defaults(handler=cmd_fix)
     return parser
 
 
