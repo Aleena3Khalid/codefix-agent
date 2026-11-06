@@ -81,6 +81,27 @@ def cmd_test(args: argparse.Namespace) -> int:
             print("\n" + report.output)
     return 0 if report.all_passed else 1
 
+def cmd_diagnose(args: argparse.Namespace) -> int:
+    from codefix.assistant import diagnose  # imported here so other commands work without the API package
+    from codefix.llm import LLM
+
+    diag = diagnose(args.repo, args.issue, llm=LLM(model=args.model), include_tests=not args.no_tests)
+    if args.json:
+        print(json.dumps(diag.to_dict(), indent=2))
+        return 0 if not diag.warnings else 1
+
+    print(f"Summary:    {diag.summary}")
+    print(f"Location:   {diag.file} :: {diag.function}")
+    print(f"Confidence: {diag.confidence}")
+    print(f"\nRoot cause:\n{diag.root_cause}")
+    print(f"\nProposed fix:\n{diag.fixed_code}")
+    for warning in diag.warnings:
+        print(f"\n[warning] {warning}", file=sys.stderr)
+    if diag.usage:
+        u = diag.usage
+        cost = f"${u.cost_usd:.4f}" if u.cost_usd is not None else "unknown cost"
+        print(f"\n[{u.model}] {u.input_tokens} in / {u.output_tokens} out tokens, {cost}, {u.latency_s}s")
+    return 0 if not diag.warnings else 1
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codefix", description="Inspect and test small Python repos.")
@@ -111,10 +132,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true", help="Show pytest output")
     p.set_defaults(handler=cmd_test)
+
+    p = sub.add_parser("diagnose", help="Ask the LLM to diagnose a bug and propose a fix")
+    p.add_argument("repo")
+    p.add_argument("issue", help="The bug report text")
+    p.add_argument("--model", default=None, help="Model id (default: CODEFIX_MODEL or claude-sonnet-5-5)")
+    p.add_argument("--no-tests", action="store_true", help="Do not run tests or send their output")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(handler=cmd_diagnose)
+    
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        from dotenv import load_dotenv
+
+        # reads ANTHROPIC_API_KEY from a .env file in the current folder
+        load_dotenv()
+    except ImportError:
+        pass
     args = build_parser().parse_args(argv)
     return args.handler(args)
 
