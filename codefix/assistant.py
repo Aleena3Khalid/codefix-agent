@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 from codefix.analyzer import ScanResult, get_function_source, scan_repository, search_functions
 from codefix.llm import LLM, Usage
-from codefix.test_runner import run_tests
+from codefix.test_runner import TestReport, run_tests
 
 SYSTEM_PROMPT = """You are a careful Python debugging assistant.
 You receive a bug report, the source of the functions most likely involved, and
@@ -99,16 +99,31 @@ def check_diagnosis(diag: Diagnosis, scan: ScanResult) -> list[str]:
     return warnings
 
 
-def diagnose(repo: str, issue: str, llm: LLM | None = None, top_k: int = 3, include_tests: bool = True) -> Diagnosis:
+def diagnose(
+    repo: str,
+    issue: str,
+    llm: LLM | None = None,
+    top_k: int = 3,
+    include_tests: bool = True,
+    test_report: TestReport | None = None,
+    feedback: str | None = None,
+) -> Diagnosis:
+    """Ask the LLM for a diagnosis.
+
+    test_report: reuse a test run you already have instead of running the tests again.
+    feedback:    text about a previous attempt that failed (used by the repair loop).
+    """
     scan = scan_repository(repo)
     test_output = None
     if include_tests:
-        report = run_tests(repo)
+        report = test_report or run_tests(repo)
         if not report.all_passed:
             test_output = report.output
 
     llm = llm or LLM()
     prompt = build_prompt(issue, scan, top_k=top_k, test_output=test_output)
+    if feedback:
+        prompt += "\n\n" + feedback.strip()
     answer, usage = llm.call_tool(SYSTEM_PROMPT, prompt, DIAGNOSIS_TOOL)
 
     diag = Diagnosis(**{key: answer.get(key, "") for key in DIAGNOSIS_TOOL["input_schema"]["required"]})
