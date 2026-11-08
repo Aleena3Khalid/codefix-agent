@@ -102,3 +102,7 @@ def test_indented_method_code_is_accepted(tmp_path):
     indented = "    def withdraw(self, amount):\n        self.balance -= amount\n"
     diag = make_diag(file="bank.py", function="Account.withdraw", fixed_code=indented)
     assert check_diagnosis(diag, scan_repository(tmp_path)) == []
+
+def test_empty_fixed_code_gets_a_clear_warning():
+    warnings = check_diagnosis(make_diag(fixed_code="   "), scan_repository(SAMPLE_REPO))
+    assert warnings == ["fixed_code is empty. Put the complete corrected function in the fixed_code field."]

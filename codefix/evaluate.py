@@ -70,6 +70,7 @@ class Row:
     output_tokens: int
     cost_usd: float | None
     duration_s: float
+    attempts_rejected: int = 0
     error: str = ""
 
 
@@ -160,6 +161,7 @@ def run_one(task: Task, config: Config, llm, repeat: int, runs_dir: Path | None,
             output_tokens=totals["output_tokens"],
             cost_usd=totals["cost_usd"],
             duration_s=result.duration_s,
+            attempts_rejected=sum(1 for a in result.attempts if a.error),
         )
 
 
@@ -207,6 +209,7 @@ def summarize(rows: list[Row]) -> dict[str, dict]:
             "correct_rate": round(correct / n, 3) if n else 0.0,
             "mean_attempts": round(statistics.mean(r.attempts for r in rs), 2) if n else 0.0,
             "attempts_with_regressions": sum(r.attempts_with_regressions for r in rs),
+            "attempts_rejected": sum(r.attempts_rejected for r in rs),
             "mean_duration_s": round(statistics.mean(r.duration_s for r in rs), 2) if n else 0.0,
             "total_tokens": sum(r.input_tokens + r.output_tokens for r in rs),
             "total_cost_usd": total_cost,
@@ -264,6 +267,7 @@ def render_report(rows: list[Row], meta: dict) -> str:
         ("API errors", lambda s: str(s["errors"])),
         ("Mean attempts", lambda s: str(s["mean_attempts"])),
         ("Attempts that caused regressions (caught)", lambda s: str(s["attempts_with_regressions"])),
+        ("Attempts rejected before testing (bad format)", lambda s: str(s["attempts_rejected"])),
         ("Mean time per task", lambda s: f"{s['mean_duration_s']}s"),
         ("Total tokens", lambda s: f"{s['total_tokens']:,}"),
         ("Total cost", lambda s: money(s["total_cost_usd"])),

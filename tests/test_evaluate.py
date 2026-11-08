@@ -123,3 +123,10 @@ def test_summary_report_and_files(tmp_path):
     assert len((tmp_path / "out" / "results.csv").read_text().strip().splitlines()) == 5  # header + 4 rows
     assert len(list((tmp_path / "runs").glob("*.json"))) == 4
     assert render_report(rows, meta).startswith("# CodeFix Agent evaluation")
+
+def test_malformed_answer_counts_as_rejected():
+    """Like the Haiku answers where the code ended up inside root_cause and fixed_code was empty."""
+    empty = reply("limits.py", "clamp", "")
+    [row] = run_eval([get_task("clamp_order")], [CONFIGS["agent"]], FixedLLM(empty))
+    assert row.outcome == "failed"
+    assert row.attempts_rejected == 3

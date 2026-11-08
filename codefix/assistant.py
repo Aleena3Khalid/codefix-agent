@@ -86,6 +86,10 @@ def check_diagnosis(diag: Diagnosis, scan: ScanResult) -> list[str]:
     known = {(f.file, f.qualified_name) for f in scan.source_functions()}
     if (diag.file, diag.function) not in known:
         warnings.append(f"Function {diag.function!r} in {diag.file!r} was not found in the repository.")
+    
+    if not diag.fixed_code.strip():
+        warnings.append("fixed_code is empty. Put the complete corrected function in the fixed_code field.")
+        return warnings    
 
     try:
         # dedent first: for a method, the model may return the code still indented
