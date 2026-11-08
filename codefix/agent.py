@@ -165,6 +165,7 @@ def run_fix(
     approve: Approver | None = None,
     timeout: int = 60,
     on_event: Callable[[str], None] | None = None,
+    include_tests: bool = True,
 ) -> FixResult:
     """Try to fix `issue` in `repo`. See the module docstring for the safety rules.
 
@@ -195,7 +196,7 @@ def run_fix(
             result.attempts.append(attempt)
             say(f"\nAttempt {number}/{max_attempts}: asking the model...")
 
-            diag = diagnose(str(repo), issue, llm=llm, test_report=baseline, feedback=feedback)
+            diag = diagnose(str(repo), issue, llm=llm, test_report=baseline, feedback=feedback, include_tests=include_tests)
             attempt.diagnosis = diag
             say(f"  Proposed change to {diag.file} :: {diag.function} (confidence {diag.confidence})")
 
@@ -244,11 +245,13 @@ def run_fix(
     return result
 
 
-def save_run(result: FixResult, runs_dir: str | Path = "runs") -> Path:
-    """Write the full record of a run to runs/<time>-<issue>.json."""
+def save_run(result: FixResult, runs_dir: str | Path = "runs", name: str | None = None) -> Path:
+    """Write the full record of a run to runs/<time>-<issue>.json (or runs/<name>.json)."""
     runs_dir = Path(runs_dir)
     runs_dir.mkdir(parents=True, exist_ok=True)
-    slug = re.sub(r"[^a-z0-9]+", "-", result.issue.lower()).strip("-")[:40] or "issue"
-    path = runs_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{slug}.json"
+    if name is None:
+        slug = re.sub(r"[^a-z0-9]+", "-", result.issue.lower()).strip("-")[:40] or "issue"
+        name = f"{datetime.now():%Y%m%d-%H%M%S}-{slug}"
+    path = runs_dir / f"{name}.json"
     path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
     return path
