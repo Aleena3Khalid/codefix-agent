@@ -143,6 +143,54 @@ def cmd_fix(args: argparse.Namespace) -> int:
         print(f"Run log: {save_run(result)}")
     return 0 if result.status in ("fixed", "fixed_not_applied") else 1
 
+def cmd_bench_check(args: argparse.Namespace) -> int:
+    from codefix.evaluate import check_task, select_tasks
+
+    bad = 0
+    for task in select_tasks(args.tasks):
+        problems = check_task(task)
+        print(f"{'OK ' if not problems else 'BAD'} {task.id:<22} {task.difficulty}")
+        for problem in problems:
+            print(f"    - {problem}")
+        bad += bool(problems)
+    print(f"\n{bad} invalid task(s).")
+    return 1 if bad else 0
+
+
+def cmd_evaluate(args: argparse.Namespace) -> int:
+    from datetime import datetime
+
+    from codefix.evaluate import CONFIGS, git_commit, new_results_dir, run_eval, select_tasks, write_results
+    from codefix.llm import LLM
+
+    names = [c.strip() for c in args.configs.split(",") if c.strip()]
+    unknown = [n for n in names if n not in CONFIGS]
+    if unknown:
+        print(f"Unknown config(s): {', '.join(unknown)}. Choose from: {', '.join(CONFIGS)}", file=sys.stderr)
+        return 2
+    configs = [CONFIGS[n] for n in names]
+    tasks = select_tasks(args.tasks)
+    llm = LLM(model=args.model)
+    out_dir = new_results_dir()
+
+    calls_max = len(tasks) * args.repeats * sum(c.max_attempts for c in configs)
+    print(f"{len(tasks)} tasks x {len(configs)} configs x {args.repeats} repeat(s), model {llm.model}.")
+    print(f"At most {calls_max} LLM calls. Results go to {out_dir}\n")
+
+    rows = run_eval(tasks, configs, llm, repeats=args.repeats, runs_dir=out_dir / "runs", on_event=print)
+    meta = {
+        "date": datetime.now().isoformat(timespec="seconds"),
+        "model": llm.model,
+        "commit": git_commit(),
+        "tasks": len(tasks),
+        "repeats": args.repeats,
+        "configs": {c.name: c.description for c in configs},
+    }
+    report = write_results(rows, meta, out_dir)
+    print(f"\nReport: {report}")
+    print(report.read_text(encoding="utf-8"))
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codefix", description="Inspect and test small Python repos.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -192,6 +240,17 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--dry-run", action="store_true", help="Never apply, just show the result")
     p.add_argument("--no-log", action="store_true", help="Do not write a run log to runs/")
     p.set_defaults(handler=cmd_fix)
+
+    p = sub.add_parser("bench-check", help="Check that every benchmark task is valid (no LLM calls)")
+    p.add_argument("--tasks", default=None, help="Comma-separated task ids (default: all)")
+    p.set_defaults(handler=cmd_bench_check)
+
+    p = sub.add_parser("evaluate", help="Run the benchmark and write a report")
+    p.add_argument("--configs", default="single,agent", help="Comma-separated: single, agent, no-tests")
+    p.add_argument("--tasks", default=None, help="Comma-separated task ids (default: all)")
+    p.add_argument("--repeats", type=int, default=1, help="Run everything this many times")
+    p.add_argument("--model", default=None)
+    p.set_defaults(handler=cmd_evaluate)
     return parser
 
 

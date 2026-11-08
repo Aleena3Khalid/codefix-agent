@@ -6,3 +6,4 @@
 .env
 runs/
 playground/
+eval_results/

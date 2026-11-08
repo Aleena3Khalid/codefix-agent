@@ -1,0 +1,13 @@
+[1mdiff --git a/sample_repo/cart.py b/sample_repo/cart.py[m
+[1mindex ac4ae67..4f34779 100644[m
+[1m--- a/sample_repo/cart.py[m
+[1m+++ b/sample_repo/cart.py[m
+[36m@@ -15,7 +15,7 @@[m [mdef apply_discount(total, percent):[m
+ [m
+ def qualifies_for_free_shipping(total, threshold=50):[m
+     """Orders of at least `threshold` ship for free."""[m
+[31m-    return total > threshold[m
+[32m+[m[32m    return total >= threshold[m
+ [m
+ [m
+ class Cart:[m
