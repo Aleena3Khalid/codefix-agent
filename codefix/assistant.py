@@ -10,6 +10,7 @@ Steps:
 from __future__ import annotations
 
 import ast
+import textwrap
 from dataclasses import dataclass, field
 
 from codefix.analyzer import ScanResult, get_function_source, scan_repository, search_functions
@@ -87,7 +88,9 @@ def check_diagnosis(diag: Diagnosis, scan: ScanResult) -> list[str]:
         warnings.append(f"Function {diag.function!r} in {diag.file!r} was not found in the repository.")
 
     try:
-        tree = ast.parse(diag.fixed_code)
+        # dedent first: for a method, the model may return the code still indented
+        # as it is inside the class. The patcher re-indents it anyway.
+        tree = ast.parse(textwrap.dedent(diag.fixed_code))
     except SyntaxError as exc:
         warnings.append(f"Proposed code does not parse: {exc}")
         return warnings

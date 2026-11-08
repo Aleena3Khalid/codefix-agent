@@ -91,3 +91,14 @@ def test_diagnose_end_to_end_with_fake_llm():
     sent = fake.calls[0]
     assert sent["tool"] is DIAGNOSIS_TOOL
     assert "assert 20.0 == 180" in sent["user"]
+
+def test_indented_method_code_is_accepted(tmp_path):
+    """A method returned with its class indentation must not be rejected as unparseable."""
+    (tmp_path / "bank.py").write_text(
+        "class Account:\n"
+        "    def withdraw(self, amount):\n"
+        "        self.balance -= amount + 1\n"
+    )
+    indented = "    def withdraw(self, amount):\n        self.balance -= amount\n"
+    diag = make_diag(file="bank.py", function="Account.withdraw", fixed_code=indented)
+    assert check_diagnosis(diag, scan_repository(tmp_path)) == []
