@@ -1,17 +1,22 @@
 """Command-line interface.
 
 Examples (run from the project folder):
-    codefix scan sample_repo
-    codefix find sample_repo "discount percentage wrong"
-    codefix show sample_repo apply_discount
-    codefix test sample_repo
-    codefix test sample_repo --json
+    python -m codefix scan sample_repo
+    python -m codefix find sample_repo "discount percentage wrong"
+    python -m codefix show sample_repo apply_discount
+    python -m codefix test sample_repo
+    python -m codefix test sample_repo --json
+
+`argparse` turns the words you type into a structured `args` object.
+Each subcommand (scan, find, show, test) has its own small handler function.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import sys
 
 from codefix.analyzer import get_function_source, scan_repository, search_functions
@@ -81,6 +86,7 @@ def cmd_test(args: argparse.Namespace) -> int:
             print("\n" + report.output)
     return 0 if report.all_passed else 1
 
+
 def cmd_diagnose(args: argparse.Namespace) -> int:
     from codefix.assistant import diagnose  # imported here so other commands work without the API package
     from codefix.llm import LLM
@@ -102,6 +108,7 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         cost = f"${u.cost_usd:.4f}" if u.cost_usd is not None else "unknown cost"
         print(f"\n[{u.model}] {u.input_tokens} in / {u.output_tokens} out tokens, {cost}, {u.latency_s}s")
     return 0 if not diag.warnings else 1
+
 
 def cmd_fix(args: argparse.Namespace) -> int:
     from codefix.agent import run_fix, save_run
@@ -142,6 +149,7 @@ def cmd_fix(args: argparse.Namespace) -> int:
     if not args.no_log:
         print(f"Run log: {save_run(result)}")
     return 0 if result.status in ("fixed", "fixed_not_applied") else 1
+
 
 def cmd_bench_check(args: argparse.Namespace) -> int:
     from codefix.evaluate import check_task, select_tasks
@@ -191,8 +199,21 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     print(report.read_text(encoding="utf-8"))
     return 0
 
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    print(f"CodeFix API on http://{args.host}:{args.port}  (interactive docs at /docs)")
+    uvicorn.run("codefix.api:app", host=args.host, port=args.port, log_level=args.log_level.lower())
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="codefix", description="Inspect and test small Python repos.")
+    parser = argparse.ArgumentParser(prog="codefix", description="Inspect, diagnose and fix bugs in small Python repos.")
+    parser.add_argument("--log-level", default=os.getenv("CODEFIX_LOG_LEVEL", "WARNING"),
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"], type=str.upper,
+                        help="How much detail to log (default: WARNING, or CODEFIX_LOG_LEVEL)")
+    parser.add_argument("--log-file", default=None, help="Also write logs to this file")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("scan", help="List functions in a repository")
@@ -251,6 +272,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repeats", type=int, default=1, help="Run everything this many times")
     p.add_argument("--model", default=None)
     p.set_defaults(handler=cmd_evaluate)
+
+    p = sub.add_parser("serve", help="Start the web API")
+    p.add_argument("--host", default="127.0.0.1", help="127.0.0.1 = only this computer can connect")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(handler=cmd_serve)
     return parser
 
 
@@ -258,12 +284,26 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from dotenv import load_dotenv
 
-        # reads ANTHROPIC_API_KEY from a .env file in the current folder
-        load_dotenv()
+        load_dotenv()  # reads ANTHROPIC_API_KEY from a .env file in the current folder
     except ImportError:
         pass
     args = build_parser().parse_args(argv)
+    setup_logging(args.log_level, args.log_file)
     return args.handler(args)
+
+
+def setup_logging(level: str, log_file: str | None = None) -> None:
+    """Send log messages to stderr (and optionally a file). Normal output stays on stdout."""
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    if log_file:
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    logging.basicConfig(
+        level=getattr(logging, level),
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=handlers,
+        force=True,
+    )
 
 
 if __name__ == "__main__":

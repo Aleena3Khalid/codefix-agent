@@ -1,7 +1,18 @@
-"""Run a repository's tests in a separate process and summarise the result."""
+"""Run a repository's tests in a separate process and summarise the result.
+
+Why a subprocess instead of importing pytest directly?
+- Isolation: the code under test cannot crash or modify our tool's process.
+- Timeout: an infinite loop in a bad patch is killed after `timeout` seconds.
+- Clean imports: every run starts fresh, so a patched file is really re-imported.
+
+Why JUnit XML instead of reading pytest's printed output?
+Printed output is meant for humans and changes between versions. JUnit XML is
+a stable, machine-readable report that pytest writes with `--junitxml`.
+"""
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -11,7 +22,9 @@ import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-# Keep only the end of long outputs: enough to see the failure, small enough to send to an LLM later.
+log = logging.getLogger(__name__)
+
+# Keep only the end of long outputs; enough to see the failure, small enough to send to an LLM later.
 MAX_OUTPUT_CHARS = 8000
 
 
@@ -24,10 +37,10 @@ class TestReport:
     duration_s: float = 0.0
     exit_code: int | None = None
     timed_out: bool = False
-    failed_tests: list[str] = field(default_factory=list)  # e.g. "tests/test_cart.py::test_apply_discount"
+    failed_tests: list[str] = field(default_factory=list)  # e.g. "tests/test_cart.py::test_discount"
     output: str = ""
 
-    # Tell pytest this class is not a test, even though its name starts with "Test".
+    # Tell pytest this class is not a test case even though its name starts with "Test".
     __test__ = False
 
     @property
@@ -52,8 +65,8 @@ class TestReport:
 def run_tests(repo: str | Path, target: str = ".", timeout: int = 60) -> TestReport:
     """Run pytest inside `repo` and return a TestReport.
 
-    `target` can be "." (everything), a file like "tests/test_cart.py",
-    or a single test like "tests/test_cart.py::test_apply_discount".
+    `target` can be "." (everything), a file like "tests/test_cart.py", or a
+    single test like "tests/test_cart.py::test_discount".
     """
     repo = Path(repo).resolve()
     if not repo.is_dir():
@@ -70,15 +83,17 @@ def run_tests(repo: str | Path, target: str = ".", timeout: int = 60) -> TestRep
         ]
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 
+        log.debug("Running tests in %s (target=%s, timeout=%ss)", repo, target, timeout)
         start = time.perf_counter()
         try:
             proc = subprocess.run(
                 cmd, cwd=repo, env=env, capture_output=True, text=True, timeout=timeout
             )
         except subprocess.TimeoutExpired as exc:
-            partial = exc.stdout or b""
+            partial = (exc.stdout or b"")
             if isinstance(partial, bytes):
                 partial = partial.decode(errors="replace")
+            log.warning("Tests in %s timed out after %ss", repo, timeout)
             return TestReport(
                 duration_s=round(time.perf_counter() - start, 3),
                 timed_out=True,
@@ -92,10 +107,12 @@ def run_tests(repo: str | Path, target: str = ".", timeout: int = 60) -> TestRep
         report.output = _tail(proc.stdout + proc.stderr)
 
         # pytest exit codes: 0 ok, 1 tests failed, 2 interrupted, 3 internal error,
-        # 4 usage error, 5 no tests collected. If pytest crashed before writing any
-        # results, count that as an error so it is never mistaken for success.
+        # 4 usage error, 5 no tests collected. If pytest crashed before writing
+        # any results, count that as an error so it is never mistaken for success.
         if report.total == 0 and proc.returncode not in (0, 5):
             report.errors = 1
+        log.info("Tests in %s: %d passed, %d failed, %d errors (%.2fs)",
+                 repo.name, report.passed, report.failed, report.errors, report.duration_s)
         return report
 
 
@@ -122,6 +139,7 @@ def _test_id(case: ET.Element) -> str:
     classname = case.get("classname", "")
     name = case.get("name", "")
     parts = classname.split(".")
+    # Find the module part (starts with test_) to rebuild the file path.
     for i, part in enumerate(parts):
         if part.startswith("test_") or part.endswith("_test"):
             file_path = "/".join(parts[: i + 1]) + ".py"

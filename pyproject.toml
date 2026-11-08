@@ -5,8 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codefix-agent"
 version = "0.1.0"
+description = "AI-assisted debugging and code repair for small Python repositories"
 requires-python = ">=3.10"
-dependencies = ["pytest>=8", "anthropic>=0.40", "python-dotenv>=1.0"]
+dependencies = [
+    "pytest>=8",
+    "anthropic>=0.40",
+    "python-dotenv>=1.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",  # used by FastAPI's TestClient in the tests
+]
 
 [project.scripts]
 codefix = "codefix.cli:main"
@@ -15,4 +23,5 @@ codefix = "codefix.cli:main"
 packages = ["codefix"]
 
 [tool.pytest.ini_options]
+# Only run our own tests. sample_repo has its own (deliberately failing) tests.
 testpaths = ["tests"]

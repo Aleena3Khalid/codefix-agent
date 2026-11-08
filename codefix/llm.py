@@ -8,12 +8,17 @@ Every LLM call in the project goes through `LLM.call_tool`, so that:
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import asdict, dataclass
 
+log = logging.getLogger(__name__)
+
 DEFAULT_MODEL = "claude-sonnet-5-5"
 
+# USD per million tokens: (input, output).
+# Check https://www.anthropic.com/pricing and update these before reporting costs.
 PRICES = {
     "claude-sonnet-5-5": (2.00, 10.00),
 }
@@ -82,7 +87,10 @@ class LLM:
             output_tokens=response.usage.output_tokens,
             latency_s=round(time.perf_counter() - start, 3),
         )
+        log.info("LLM call: model=%s in=%d out=%d tokens latency=%.2fs",
+                 usage.model, usage.input_tokens, usage.output_tokens, usage.latency_s)
         for block in response.content:
             if block.type == "tool_use" and block.name == tool["name"]:
                 return dict(block.input), usage
+        log.warning("Model did not call %s (stop_reason=%s)", tool["name"], response.stop_reason)
         raise LLMError(f"Model did not call {tool['name']!r} (stop_reason={response.stop_reason})")

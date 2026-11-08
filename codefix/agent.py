@@ -11,6 +11,7 @@ Safety rules:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import tempfile
@@ -25,6 +26,8 @@ from codefix.assistant import Diagnosis, diagnose
 from codefix.llm import LLM
 from codefix.patcher import Patch, PatchError, apply_patch, make_patch
 from codefix.test_runner import TestReport, run_tests
+
+log = logging.getLogger(__name__)
 
 SANDBOX_IGNORE = shutil.ignore_patterns(".git", ".venv", "venv", "__pycache__", ".pytest_cache", "runs", "node_modules")
 
@@ -172,6 +175,7 @@ def run_fix(
     approve: called with the winning patch. Return True to apply it to the real repo.
              None means never apply (a dry run).
     on_event: optional callback for progress messages (the CLI prints them).
+    include_tests: send the failing test output to the model (False is used in experiments).
     """
     say = on_event or (lambda msg: None)
     repo = Path(repo).resolve()
@@ -196,7 +200,9 @@ def run_fix(
             result.attempts.append(attempt)
             say(f"\nAttempt {number}/{max_attempts}: asking the model...")
 
-            diag = diagnose(str(repo), issue, llm=llm, test_report=baseline, feedback=feedback, include_tests=include_tests)
+            diag = diagnose(
+                str(repo), issue, llm=llm, test_report=baseline, feedback=feedback, include_tests=include_tests
+            )
             attempt.diagnosis = diag
             say(f"  Proposed change to {diag.file} :: {diag.function} (confidence {diag.confidence})")
 
@@ -209,6 +215,7 @@ def run_fix(
                     attempt.error = str(exc)
 
             if attempt.error:
+                log.warning("Attempt %d rejected before testing: %s", number, attempt.error)
                 say(f"  Rejected before testing: {attempt.error}")
                 feedback = feedback_for(attempt)
                 continue
@@ -226,6 +233,8 @@ def run_fix(
                 f"Fixed {len(attempt.fixed)}, still failing {len(attempt.still_failing)}, "
                 f"regressions {len(attempt.regressions)}.")
 
+            log.info("Attempt %d: success=%s fixed=%s regressions=%s still_failing=%s",
+                     number, attempt.success, attempt.fixed, attempt.regressions, attempt.still_failing)
             if attempt.success:
                 break
             feedback = feedback_for(attempt)
@@ -242,6 +251,8 @@ def run_fix(
         result.status = "fixed_not_applied"
 
     result.duration_s = round(time.perf_counter() - start, 3)
+    log.info("Run finished: status=%s attempts=%d applied=%s duration=%.2fs",
+             result.status, len(result.attempts), result.applied, result.duration_s)
     return result
 
 
