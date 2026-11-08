@@ -6,7 +6,6 @@ An AI agent that takes a bug report for a small Python repository, finds the rel
 
 ```
 $ codefix fix sample_repo "An order of exactly 50.00 is charged shipping, but the policy is free shipping for orders of at least 50."
-
 Running tests to get a baseline...
 Baseline: 8 passed, 4 failed, 0 errors
 
@@ -14,20 +13,26 @@ Attempt 1/3: asking the model...
   Proposed change to cart.py :: qualifies_for_free_shipping (confidence high)
   Sandbox tests: 9 passed, 3 failed. Fixed 1, still failing 0, regressions 0.
 
+Attempt 1 passed in the sandbox. Fixed: tests/test_cart.py::test_free_shipping_at_threshold. Regressions: none.
+
 Proposed patch:
 --- a/cart.py
 +++ b/cart.py
-@@ -16,4 +16,4 @@
+@@ -15,7 +15,7 @@
+ 
  def qualifies_for_free_shipping(total, threshold=50):
      """Orders of at least `threshold` ship for free."""
 -    return total > threshold
 +    return total >= threshold
+ 
+ 
+ class Cart:
 
 Apply this patch to cart.py? [y/N] y
 
 Status: fixed
 Tests in sample_repo now: 9 passed, 3 failed
-1 attempt(s), 1 LLM call(s), 1771 in / 531 out tokens, $0.0089, 9.2s total
+1 attempt(s), 1 LLM call(s), 1771 in / 521 out tokens, $0.0088, 24.056s total
 ```
 
 ## How it works
